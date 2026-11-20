@@ -1,0 +1,42 @@
+[
+  {
+    "AutoRemove": false,
+    "Command": ["sleep", "infinity"],
+    "CreatedAt": "2 hours ago",
+    "CIDFile": "",
+    "Exited": true,
+    "ExitedAt": 1795160000,
+    "ExitCode": 137,
+    "Id": "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111",
+    "Image": "docker.io/nousresearch/hermes-sandbox:desktop",
+    "IsInfra": false,
+    "Labels": {"hermes-podman": "1", "hermes-task-id": "test-task", "hermes-profile": "default"},
+    "Names": ["hermes-podman-0000aaaa"],
+    "Pid": 0,
+    "Restarts": 0,
+    "StartedAt": 1795150000,
+    "State": "exited",
+    "Status": "Exited (137) 2 hours ago",
+    "Created": 1795140000
+  },
+  {
+    "AutoRemove": false,
+    "Command": ["sleep", "infinity"],
+    "CreatedAt": "1 hour ago",
+    "CIDFile": "",
+    "Exited": false,
+    "ExitedAt": -62135596800,
+    "ExitCode": 0,
+    "Id": "bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222",
+    "Image": "docker.io/nousresearch/hermes-sandbox:desktop",
+    "IsInfra": false,
+    "Labels": {"hermes-podman": "1", "hermes-task-id": "test-task", "hermes-profile": "default"},
+    "Names": ["hermes-podman-0000bbbb"],
+    "Pid": 4242,
+    "Restarts": 0,
+    "StartedAt": 1795162327,
+    "State": "running",
+    "Status": "Up 1 hour",
+    "Created": 1795162326
+  }
+]

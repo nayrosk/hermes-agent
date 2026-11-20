@@ -1,0 +1,59 @@
+{
+  "host": {
+    "arch": "amd64",
+    "cgroupControllers": [
+      "cpu",
+      "memory",
+      "pids"
+    ],
+    "cgroupManager": "systemd",
+    "cgroupVersion": "v2",
+    "idMappings": {
+      "gidmap": [
+        {
+          "container_id": 0,
+          "host_id": 1000,
+          "size": 1
+        },
+        {
+          "container_id": 1,
+          "host_id": 100000,
+          "size": 65536
+        }
+      ],
+      "uidmap": [
+        {
+          "container_id": 0,
+          "host_id": 1000,
+          "size": 1
+        },
+        {
+          "container_id": 1,
+          "host_id": 100000,
+          "size": 65536
+        }
+      ]
+    },
+    "linkmode": "dynamic",
+    "networkBackend": "netavark",
+    "ociRuntime": {
+      "name": "crun",
+      "package": "crun-1.31-1"
+    },
+    "os": "linux",
+    "rootlessNetworkCmd": "pasta",
+    "security": {
+      "apparmorEnabled": false,
+      "rootless": true,
+      "seccompEnabled": true,
+      "selinuxEnabled": true
+    }
+  },
+  "version": {
+    "APIVersion": "6.2.0",
+    "Arch": "amd64",
+    "GoVersion": "go1.25",
+    "Os": "linux",
+    "Version": "6.2.0"
+  }
+}
