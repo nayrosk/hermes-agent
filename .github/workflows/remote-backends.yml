@@ -1,14 +1,17 @@
 name: Remote terminal backends
 
-# The SSH and Docker terminal backends against a real sshd and a real Docker
-# daemon. Every other test of these backends mocks subprocess / the docker CLI;
-# the gated real-backend tests in tests/tools/test_ssh_environment.py skipped on
-# every CI run because nothing provided a host.
+# The SSH, Docker and Podman terminal backends against a real sshd, a real
+# Docker daemon and real rootless Podman. Every other test of these backends
+# mocks subprocess / the container CLI; the gated real-backend tests in
+# tests/tools/test_ssh_environment.py skipped on every CI run because nothing
+# provided a host.
 #
-# This job provides one: a throwaway sshd container on 127.0.0.1 that accepts a
-# keypair generated for this run only (scripts/ci/start_test_sshd.sh), plus the
-# runner's own Docker daemon with a small public image. No secrets are involved
-# and none may be added: ci.yaml runs PR-controlled code.
+# real-backends provides one: a throwaway sshd container on 127.0.0.1 that
+# accepts a keypair generated for this run only (scripts/ci/start_test_sshd.sh),
+# plus the runner's own Docker daemon with a small public image. real-podman
+# runs the Podman backend as the unprivileged runner user against Ubuntu
+# 24.04's own Podman (4.9, the oldest supported release) in strict mode. No
+# secrets are involved and none may be added: ci.yaml runs PR-controlled code.
 #
 # ci.yaml calls this only when a PR touches the backends (the classifier's
 # `remote_backends` lane) and on every push to main.
@@ -29,7 +32,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref_type != 'tag' && inputs.commit == '' }}
 
 env:
-  # One small image for both the sshd host and the docker backend's sandbox, pinned
+  # One small image for the sshd host and the docker and podman sandboxes, pinned
   # by digest so a tag move cannot change what the lane tests.
   HERMES_TEST_IMAGE_REF: debian:trixie-20261020-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
 
@@ -81,3 +84,104 @@ jobs:
       - name: sshd log
         if: failure()
         run: docker logs hermes-test-sshd || true
+
+  real-podman:
+    name: Podman backend (real rootless Podman)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # The test file builds every sandbox with strict=True as well, since
+      # scripts/run_tests.sh starts pytest from a clean environment.
+      TERMINAL_PODMAN_STRICT: 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a  # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+
+      - name: Install Podman and pasta from the distro
+        uses: ./.github/actions/retry
+        with:
+          command: sudo apt-get update -q && sudo apt-get install -y -q podman passt
+
+      - name: Give the runner user a rootless setup
+        # One contiguous subordinate range per user: a second adjacent range would
+        # be mapped as split extents and break userns=auto. cgroup controllers are
+        # delegated to user sessions and the runner's user manager is started, so
+        # CPU, memory and PID limits apply; the strict posture check refuses
+        # otherwise.
+        run: |
+          user="$(id -un)"
+          grep -q "^${user}:" /etc/subuid || sudo usermod --add-subuids 100000-165535 "$user"
+          grep -q "^${user}:" /etc/subgid || sudo usermod --add-subgids 100000-165535 "$user"
+          grep "^${user}:" /etc/subuid /etc/subgid
+          sudo mkdir -p /etc/systemd/system/user@.service.d
+          printf '[Service]\nDelegate=cpu cpuset io memory pids\n' \
+            | sudo tee /etc/systemd/system/user@.service.d/delegate.conf
+          sudo systemctl daemon-reload
+          sudo loginctl enable-linger "$user"
+          uid="$(id -u)"
+          # Lingering may already have started the user manager under the old
+          # unit: restart it so the Delegate= drop-in applies deterministically.
+          sudo systemctl restart "user@${uid}.service"
+          bus_ready=false
+          for _ in $(seq 30); do
+            if [ -S "/run/user/${uid}/bus" ]; then
+              bus_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$bus_ready" != true ]; then
+            echo "::error::user session bus /run/user/${uid}/bus did not appear within 30s"
+            exit 1
+          fi
+          echo "XDG_RUNTIME_DIR=/run/user/${uid}" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus" >> "$GITHUB_ENV"
+          podman system migrate
+
+      - name: Check Podman is rootless
+        run: |
+          podman version
+          podman info --format json > "$RUNNER_TEMP/podman-info.json"
+          jq '{version: .version.Version, rootless: .host.security.rootless,
+               cgroupVersion: .host.cgroupVersion, controllers: .host.cgroupControllers,
+               network: .host.rootlessNetworkCmd, uidmap: .host.idMappings.uidmap}' \
+            "$RUNNER_TEMP/podman-info.json"
+          if [ "$(jq -r .host.security.rootless "$RUNNER_TEMP/podman-info.json")" != true ]; then
+            echo "::error::podman info does not report rootless: true for $(id -un)"
+            exit 1
+          fi
+
+      - name: Pull the test image
+        uses: ./.github/actions/retry
+        with:
+          command: podman pull -q "docker.io/library/$HERMES_TEST_IMAGE_REF"
+
+      - name: Set up locked Python and test dependencies
+        uses: ./.github/actions/setup-pm
+        with:
+          extras: '[]'
+          test-environment: 'true'
+          prune-python-cache: true
+
+      - name: Run the real Podman backend tests
+        env:
+          HERMES_TEST_PODMAN_IMAGE: docker.io/library/${{ env.HERMES_TEST_IMAGE_REF }}
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+        # A skip here would be a green lane over zero coverage: --fail-on-skip
+        # fails the run on any skip.
+        run: |
+          if ! scripts/run_tests.sh --fail-on-skip tests/tools/test_podman_backend_real.py; then
+            echo "::error::real Podman tests failed or skipped (a skip means HERMES_TEST_PODMAN_IMAGE was not wired through)"
+            exit 1
+          fi
+
+      - name: Podman state
+        if: failure()
+        run: |
+          podman ps -a --filter label=hermes-podman=1 --format json || true
+          systemctl --user status --no-pager || true

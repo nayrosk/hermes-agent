@@ -373,6 +373,11 @@ CASES = {
     "real docker backend test → remote_backends": (
         ["tests/tools/test_docker_backend_real.py"],
         _lanes(python=True, python_prod=False, scan=True, remote_backends=True)),
+    "real podman backend test → remote_backends": (
+        ["tests/tools/test_podman_backend_real.py"],
+        _lanes(python=True, python_prod=False, scan=True, remote_backends=True)),
+    "podman backend → remote_backends": (
+        ["tools/environments/podman.py"], _lanes(python=True, scan=True, remote_backends=True)),
     "mocked docker unit test → no remote_backends": (
         ["tests/tools/test_docker_environment.py"], _lanes(python=True, python_prod=False, scan=True)),
     "sshd harness → remote_backends": (

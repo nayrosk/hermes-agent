@@ -207,7 +207,7 @@ Then a gate step in `ci.yaml` rewrites the result:
 | `site` | the Docusaurus site |
 | `bootstrap` | `install.sh` and its pin fragments and stamp |
 | `desktop_updater` | `scripts/desktop-update/` and its Windows hand-off tests |
-| `remote_backends` | the SSH/Docker terminal backends, the terminal tool, their real-backend tests |
+| `remote_backends` | the SSH/Docker/Podman terminal backends, the terminal tool, their real-backend tests |
 | `uv_lock` | `pyproject.toml` or `uv.lock` |
 | `deps` | `pyproject.toml` |
 | `scan` | Python files, `.pth`, setup hooks |
