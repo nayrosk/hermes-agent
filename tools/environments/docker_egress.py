@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
+from pathlib import Path
 
 logger = logging.getLogger("tools.environments.docker")
 
@@ -26,31 +28,39 @@ _PROXY_CONTROL_ENV = frozenset({
     "NODE_EXTRA_CA_CERTS"})
 
 
-def _egress_proxy_args_for_docker() -> tuple[list[str], dict[str, str], list[str]]:
-    """``(volume_args, env_overrides, host_args)`` for routing through iron-proxy; all empty
-    when the proxy is disabled/unconfigured/not running. Under ``proxy.enforce_on_docker``
-    (default) any half-configured state raises so the sandbox refuses to start unprotected;
-    otherwise it warns and continues. Only ImportError is swallowed — a broken config must
-    fail visibly rather than silently disable enforcement."""
+@dataclass(frozen=True)
+class ResolvedEgress:
+    """A running, fully configured iron-proxy, as a container backend needs it."""
+    ca_cert_path: Path
+    tunnel_port: int
+    listen_host: str  # iron-proxy's tunnel bind host (``_probe_target()[0]``)
+    token_env: dict[str, str]  # sandbox env name -> proxy token (never a real credential)
+
+
+def resolve_egress(enforce_key: str) -> ResolvedEgress | None:
+    """Resolve iron-proxy state for a container backend; ``None`` when the proxy is
+    disabled/unconfigured/not running. Under ``proxy.<enforce_key>`` (default true) any
+    half-configured state raises so the sandbox refuses to start unprotected; otherwise it
+    warns (naming *enforce_key*) and returns ``None``. Only ImportError is swallowed — a
+    broken config must fail visibly rather than silently disable enforcement."""
     try:
         from hermes_cli.config import load_config
         from agent.proxy_sources import iron_proxy as ip
     except ImportError as exc:
         logger.debug("Egress proxy plumbing unavailable: %s", exc)
-        return ([], {}, [])
+        return None
 
     proxy_cfg = load_config().get("proxy") or {}
     if not proxy_cfg.get("enabled"):
-        return ([], {}, [])
+        return None
 
     status = ip.get_status()
-    enforce = bool(proxy_cfg.get("enforce_on_docker", True))
+    enforce = bool(proxy_cfg.get(enforce_key, True))
 
-    def _degraded(msg: str):
+    def _degraded(msg: str) -> None:
         if enforce:
             raise RuntimeError(msg)
-        logger.warning("%s — continuing without proxy (enforce_on_docker=false).", msg)
-        return ([], {}, [])
+        logger.warning("%s — continuing without proxy (%s=false).", msg, enforce_key)
 
     if not status.configured:
         return _degraded(
@@ -75,11 +85,28 @@ def _egress_proxy_args_for_docker() -> tuple[list[str], dict[str, str], list[str
             "corrupt.  Re-run `hermes egress setup` to mint provider "
             "tokens before starting a sandbox.")
 
-    volume_args = ["-v", f"{status.ca_cert_path}:{_CONTAINER_CA}:ro"]
+    # Proxy tokens under the standard provider env names (and their aliases) so
+    # SDKs work unchanged; HERMES_PROXY_TOKEN_* copies are for diagnostics.
+    token_env: dict[str, str] = {}
+    for m in mappings:
+        token_env[m.real_env_name] = m.proxy_token
+        token_env[f"HERMES_PROXY_TOKEN_{m.real_env_name}"] = m.proxy_token
+        for alias in getattr(m, "alias_env_names", ()) or ():
+            token_env[alias] = m.proxy_token
 
+    return ResolvedEgress(
+        ca_cert_path=status.ca_cert_path,
+        tunnel_port=status.tunnel_port,
+        listen_host=ip._probe_target()[0],
+        token_env=token_env)
+
+
+def proxy_env(proxy_host: str, tunnel_port: int, token_env: dict[str, str]) -> dict[str, str]:
+    """Sandbox env routing through iron-proxy at *proxy_host* (as seen from the container)."""
+    host = f"[{proxy_host}]" if ":" in proxy_host else proxy_host  # IPv6 literal
     # tunnel_port serves CONNECT (HTTPS); the plain-HTTP forward listener is on +1.
-    proxy_url = f"http://host.docker.internal:{status.tunnel_port}"
-    plain_http_url = f"http://host.docker.internal:{status.tunnel_port + 1}"
+    proxy_url = f"http://{host}:{tunnel_port}"
+    plain_http_url = f"http://{host}:{tunnel_port + 1}"
     env_overrides: dict[str, str] = {
         # Both casings: some tools only read one.
         "HTTPS_PROXY": proxy_url,
@@ -99,15 +126,20 @@ def _egress_proxy_args_for_docker() -> tuple[list[str], dict[str, str], list[str
         "NODE_EXTRA_CA_CERTS": _CONTAINER_CA,
         "HERMES_EGRESS_PROXY": "1",  # lets the in-sandbox agent know it is proxy-aware
         _NODE_OPTIONS_SENTINEL: "--use-openssl-ca"}
+    env_overrides.update(token_env)
+    return env_overrides
 
-    # Proxy tokens under the standard provider env names (and their aliases) so
-    # SDKs work unchanged; HERMES_PROXY_TOKEN_* copies are for diagnostics.
-    for m in mappings:
-        env_overrides[m.real_env_name] = m.proxy_token
-        env_overrides[f"HERMES_PROXY_TOKEN_{m.real_env_name}"] = m.proxy_token
-        for alias in getattr(m, "alias_env_names", ()) or ():
-            env_overrides[alias] = m.proxy_token
 
+def _egress_proxy_args_for_docker() -> tuple[list[str], dict[str, str], list[str]]:
+    """``(volume_args, env_overrides, host_args)`` for routing through iron-proxy; all empty
+    when the proxy is disabled/unconfigured/not running. Under ``proxy.enforce_on_docker``
+    (default) any half-configured state raises so the sandbox refuses to start unprotected;
+    otherwise it warns and continues (see :func:`resolve_egress`)."""
+    resolved = resolve_egress("enforce_on_docker")
+    if resolved is None:
+        return ([], {}, [])
+    volume_args = ["-v", f"{resolved.ca_cert_path}:{_CONTAINER_CA}:ro"]
+    env_overrides = proxy_env("host.docker.internal", resolved.tunnel_port, resolved.token_env)
     # Linux needs an explicit host-gateway mapping; Docker Desktop already has it.
     host_args = ["--add-host", "host.docker.internal:host-gateway"]
     return (volume_args, env_overrides, host_args)
