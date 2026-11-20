@@ -241,14 +241,28 @@ These variables configure the [Tool Gateway](../user-guide/features/tool-gateway
 
 | Variable | Description |
 |----------|-------------|
-| `TERMINAL_ENV` | Backend: `local`, `docker`, `ssh`, `modal`, `daytona`, `vercel_sandbox`, or a plugin backend (`singularity`, `sprites`) |
-| `HERMES_DOCKER_BINARY` | Override the container binary Hermes shells out to (e.g. `podman`, `/usr/local/bin/docker`). When unset, Hermes auto-discovers `docker` or `podman` on `PATH`. Needed when both are installed and you want the non-default, or when the binary lives outside `PATH`. |
+| `TERMINAL_ENV` | Backend: `local`, `docker`, `podman`, `ssh`, `modal`, `daytona`, `vercel_sandbox`, or a plugin backend (`singularity`, `sprites`) |
+| `HERMES_DOCKER_BINARY` | Override the container binary Hermes shells out to (e.g. `podman`, `/usr/local/bin/docker`). When unset, Hermes auto-discovers `docker` or `podman` on `PATH`. Needed when both are installed and you want the non-default, or when the binary lives outside `PATH`. For Podman, prefer `terminal.backend: podman` (see [Rootless Podman Backend](../user-guide/podman.md)); it has no binary-override variable. |
 | `TERMINAL_DOCKER_IMAGE` | Docker image (default: `nousresearch/hermes-sandbox:desktop`) |
 | `TERMINAL_DOCKER_FORWARD_ENV` | JSON array of env var names to explicitly forward into Docker terminal sessions. Note: skill-declared `required_environment_variables` are forwarded automatically — you only need this for vars not declared by any skill. |
 | `TERMINAL_DOCKER_VOLUMES` | Additional Docker volume mounts (comma-separated `host:container` pairs) |
 | `TERMINAL_DOCKER_ENV` | JSON object of extra env vars to set inside Docker terminal sessions (e.g. `{"FOO":"bar"}`) |
 | `TERMINAL_DOCKER_EXTRA_ARGS` | JSON array of extra `docker run` arguments (e.g. `["--memory","4g"]`) |
 | `TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE` | Advanced opt-in: mount the launch cwd into Docker `/workspace` (`true`/`false`, default: `false`) |
+| `TERMINAL_PODMAN_*` note | The `podman` backend finds `podman` on `PATH`; there is no binary-override environment variable. |
+| `TERMINAL_PODMAN_IMAGE` | Podman sandbox image for `terminal.backend: podman`. Unqualified names get `docker.io/`. |
+| `TERMINAL_PODMAN_VOLUMES` | JSON array of additional Podman volume mounts (e.g. `["/data:/data:ro"]`) |
+| `TERMINAL_PODMAN_ENV` | JSON object of extra env vars to set inside Podman sandboxes |
+| `TERMINAL_PODMAN_FORWARD_ENV` | JSON array of host env var names to forward into Podman sandboxes |
+| `TERMINAL_PODMAN_EXTRA_ARGS` | JSON array of extra `podman run` arguments |
+| `TERMINAL_PODMAN_SHM_SIZE` | Podman `/dev/shm` size (default: `1g`) |
+| `TERMINAL_PODMAN_NETWORK` | `false` runs the sandbox with `--network=none` (default: `true`) |
+| `TERMINAL_PODMAN_PERSIST_ACROSS_PROCESSES` | Reuse the Podman container across Hermes processes (default: `true`) |
+| `TERMINAL_PODMAN_SHARED_CONTAINER_KEY` | Opt trusted profiles into one shared Podman container identity (default: empty) |
+| `TERMINAL_PODMAN_ORPHAN_REAPER` | Sweep abandoned exited Podman containers at startup (default: `true`) |
+| `TERMINAL_PODMAN_MOUNT_CWD_TO_WORKSPACE` | Mount the launch cwd into Podman `/workspace` (default: `false`) |
+| `TERMINAL_PODMAN_USERNS` | User-namespace mode: empty (default, container root = host user), `keep-id`, or `auto` |
+| `TERMINAL_PODMAN_STRICT` | `true` refuses to start on rootless posture warnings (default: `false`) |
 | `TERMINAL_SINGULARITY_IMAGE` | Singularity image or `.sif` path (read by the [`singularity` plugin](https://github.com/NousResearch/hermes-official-plugins/tree/main/singularity)) |
 | `TERMINAL_MODAL_IMAGE` | Modal container image |
 | `TERMINAL_DAYTONA_IMAGE` | Daytona sandbox image |
@@ -269,13 +283,13 @@ For cloud sandbox backends, persistence is filesystem-oriented. `TERMINAL_LIFETI
 | `TERMINAL_SSH_PORT` | SSH port (default: 22) |
 | `TERMINAL_SSH_KEY` | Path to private key |
 
-## Container Resources (Docker, Modal, Daytona, container plugin backends)
+## Container Resources (Docker, Podman, Modal, Daytona, container plugin backends)
 
 | Variable | Description |
 |----------|-------------|
 | `TERMINAL_CONTAINER_CPU` | CPU cores (default: 1) |
 | `TERMINAL_CONTAINER_MEMORY` | Memory in MB (default: 5120) |
-| `TERMINAL_CONTAINER_DISK` | Disk in MB (default: 51200) |
+| `TERMINAL_CONTAINER_DISK` | Disk in MB (default: 51200). Ignored by the Podman backend. |
 | `TERMINAL_CONTAINER_PERSISTENT` | Persist container filesystem across sessions (default: `true`) |
 | `TERMINAL_SANDBOX_DIR` | Host directory for workspaces and overlays (default: `~/.hermes/sandboxes/`) |
 

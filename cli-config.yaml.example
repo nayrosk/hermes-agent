@@ -510,6 +510,43 @@ terminal:
 #   #   - "SETUID"
 
 # -----------------------------------------------------------------------------
+# OPTION 3b: Rootless Podman container
+# Commands run in a rootless Podman container (no root daemon). Needs Podman 4.9+;
+# the egress firewall (proxy.enabled) also needs pasta networking.
+# Great for: Docker-style isolation without a root daemon
+# -----------------------------------------------------------------------------
+# terminal:
+#   backend: "podman"
+#   cwd: "/workspace"  # Path INSIDE the container (default: /)
+#   timeout: 180
+#   lifetime_seconds: 300
+#   podman_image: "nousresearch/hermes-sandbox:desktop"
+#   podman_mount_cwd_to_workspace: true   # Explicit opt-in: mount your launch cwd into /workspace
+#   # Bind mounts, "host_path:container_path[:mode]"; on SELinux hosts the :z relabel is added for you.
+#   podman_volumes:
+#     - "/home/user/.hermes/cache/documents:/output"
+#   # Exact key-value env pairs set inside the container.
+#   podman_env:
+#     SSH_AUTH_SOCK: "/run/user/1000/ssh-agent.sock"
+#   # Optional: explicitly forward selected env vars into the container (visible to its commands).
+#   podman_forward_env:
+#     - "GITHUB_TOKEN"
+#   podman_shm_size: "1g"          # /dev/shm size; "" or "0" = Podman's default
+#   podman_network: true           # false = --network=none
+#   podman_persist_across_processes: true   # reuse the container across Hermes processes
+#   podman_shared_container_key: ""         # trusted profiles sharing one container; "" = per profile
+#   podman_orphan_reaper: true     # sweep abandoned exited Podman sandboxes at startup
+#   # User namespace: "" (default: container root is your host user), "keep-id" (run as your
+#   # uid inside the container) or "auto" (a fresh subuid range per container).
+#   podman_userns: ""
+#   podman_strict: false           # true = refuse to start on rootless posture problems instead of warning
+#   # podman_extra_args:           # extra flags appended verbatim to podman run
+#   #   - "--cap-add"
+#   #   - "SETUID"
+# proxy:
+#   enforce_on_podman: true        # egress enabled but unreachable: refuse (false = run without the proxy)
+
+# -----------------------------------------------------------------------------
 # OPTION 4: Singularity/Apptainer container (the official `singularity` plugin)
 # Commands run in a Singularity container (common in HPC environments)
 # Great for: HPC clusters, shared compute environments

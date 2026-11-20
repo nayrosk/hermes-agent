@@ -15,7 +15,7 @@ The security model has eight layers:
 1. **User authorization** — who can talk to the agent (allowlists, DM pairing)
 2. **Dangerous command approval** — human-in-the-loop for destructive operations
 3. **File write safety** — denylist and optional write sandbox for `write_file`/`patch`
-4. **Container isolation** — Docker/Modal (and the Singularity plugin) sandboxing with hardened settings
+4. **Container isolation** — Docker/Podman/Modal (and the Singularity plugin) sandboxing with hardened settings
 5. **MCP credential filtering** — environment variable isolation for MCP subprocesses
 6. **Context file scanning** — prompt injection detection in project files
 7. **Cross-session isolation** — sessions cannot access each other's data or state; cron job storage paths are hardened against path traversal attacks
@@ -248,7 +248,7 @@ The following patterns trigger approval prompts (defined in `tools/approval.py`)
 | `osascript` or `osacompile` whose script closes, quits, saves, deletes, moves, writes, sends keystrokes/clicks or runs `do shell script` / Terminal's `do script` (any JXA `-l JavaScript` program counts; `¬` continuations and comments are read through), or whose script comes from a file, pipe, `$VAR`/`$(...)` expansion or a carrier (`sh -c`, `eval`, `ssh`, `xargs`, ...) | AppleScript can discard the operator's unsaved work in any app. Always a manual, one-time prompt, even in `smart` mode. Detection is a command-line heuristic, not a boundary. Read-only literal scripts (`get name of first application process whose frontmost is true`, `activate`, `display notification`) are not flagged |
 
 :::info
-**Container bypass**: When running in `docker`, `modal`, `daytona`, or `vercel_sandbox` backends (or a container plugin backend such as `singularity` or `sprites`), dangerous command checks are **skipped** because the container itself is the security boundary. Destructive commands inside a container can't harm the host.
+**Container bypass**: When running in `docker`, `podman`, `modal`, `daytona`, or `vercel_sandbox` backends (or a container plugin backend such as `singularity` or `sprites`), dangerous command checks are **skipped** because the container itself is the security boundary. Destructive commands inside a container can't harm the host.
 :::
 
 ### `execute_code` Scripts {#execute-code-scripts}
@@ -633,6 +633,10 @@ terminal:
   container_disk: 51200   # MB (default 50GB, requires overlay2 on XFS)
   container_persistent: true  # Persist filesystem across sessions
 ```
+
+### Podman Backend
+
+The `podman` backend gives the same sandbox with a different trust model: no root daemon, and container root is your unprivileged host user by default (`--userns=host` under rootless Podman). Hermes warns at startup when the posture weakens that (rootful Podman, no cgroup delegation, bad subuid ranges), and `terminal.podman_strict: true` refuses to start instead. With `proxy.enabled`, egress needs `pasta` and is refused when unreachable unless `proxy.enforce_on_podman: false`. `container_disk` is ignored. See [Rootless Podman Backend](./podman.md).
 
 ### Filesystem Persistence
 

@@ -336,6 +336,7 @@ For cloud sandboxes such as Modal, Daytona, Vercel Sandbox, and Sprites, `contai
 |---------|-------------------|-----------|----------|
 | **local** | Your machine directly | None | Development, personal use |
 | **docker** | Single persistent Docker container (shared across session, `/new`, subagents) | Full (namespaces, cap-drop) | Safe sandboxing, CI/CD |
+| **podman** | Single persistent rootless Podman container (see [Rootless Podman Backend](./podman.md)) | Full (rootless user namespace, cap-drop) | Daemonless sandboxing without a root daemon |
 | **ssh** | Remote server via SSH | Network boundary | Remote dev, powerful hardware |
 | **modal** | Modal cloud sandbox | Full (cloud VM) | Ephemeral cloud compute, evals |
 | **daytona** | Daytona workspace | Full (cloud container) | Managed cloud dev environments |
@@ -466,7 +467,7 @@ terminal:
 
 **`terminal.docker_network`** (default `true`; env: `TERMINAL_DOCKER_NETWORK`) — set to `false` to run the sandbox container with `--network=none`, cutting off all network egress from agent commands. This applies to the execution container used by `terminal`, `execute_code`, and the file tools. Because containers persist across Hermes processes, flipping this to `false` while an older networked container exists will remove that container and start a fresh air-gapped one (a warning is logged); background processes running inside it are lost. Prefer this key over passing `--network=none` through `docker_extra_args`.
 
-**Requirements:** Docker Desktop or Docker Engine installed and running. Hermes probes `$PATH` plus common macOS install locations (`/usr/local/bin/docker`, `/opt/homebrew/bin/docker`, Docker Desktop app bundle). Podman is supported out of the box: set `HERMES_DOCKER_BINARY=podman` (or the full path) to force it when both are installed.
+**Requirements:** Docker Desktop or Docker Engine installed and running. Hermes probes `$PATH` plus common macOS install locations (`/usr/local/bin/docker`, `/opt/homebrew/bin/docker`, Docker Desktop app bundle). Pointing this backend at Podman with `HERMES_DOCKER_BINARY=podman` (or the full path) still works, but for Podman use the dedicated `podman` backend instead: see [Rootless Podman Backend](./podman.md).
 
 #### Container lifecycle
 
