@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 
 from hermes_cli.web_deps import late
+from tools.environments.podman_posture import find_podman
 from hermes_cli.web_server_profiles import _plugin_terminal_backend_rows
 from starlette.concurrency import run_in_threadpool
 from hermes_cli.web_models import (
@@ -82,6 +83,21 @@ def _probe_docker_backend(_cfg) -> tuple:
         return ("unavailable", f"{runtime} probe failed: {exc}")
 
 
+def _probe_podman_backend(_cfg) -> tuple:
+    """Health-check the podman terminal backend via ``podman info`` (JSON posture)."""
+    from tools.environments.base import EnvironmentConnectionError
+    from tools.environments.podman_posture import posture_warnings, probe_posture
+
+    podman_exe = find_podman()
+    if not podman_exe:
+        return ("needs_setup", "Podman not found — install Podman 4.9 or newer.")
+    try:
+        warnings = posture_warnings(probe_posture(podman_exe))
+    except EnvironmentConnectionError as exc:
+        return ("needs_setup", f"Podman not usable — {exc}")
+    return ("ready", warnings[0] if warnings else "")
+
+
 def _probe_ssh_backend(terminal_cfg: dict) -> tuple:
     host = _terminal_cfg_value(terminal_cfg, "ssh_host", "TERMINAL_SSH_HOST")
     user = _terminal_cfg_value(terminal_cfg, "ssh_user", "TERMINAL_SSH_USER")
@@ -119,6 +135,7 @@ def _probe_daytona_backend(_cfg) -> tuple:
 _BACKEND_PROBES = {
     "local": lambda _cfg: ("ready", ""),
     "docker": _probe_docker_backend,
+    "podman": _probe_podman_backend,
     "ssh": _probe_ssh_backend,
     "modal": _probe_modal_backend,
     "daytona": _probe_daytona_backend,

@@ -10,6 +10,7 @@ from tools import tool_backend_helpers
 
 logger = logging.getLogger("hermes_cli.setup")
 
+from tools.environments.podman_posture import find_podman, posture_warnings, probe_posture
 from hermes_cli.config_defaults import DEFAULT_SANDBOX_IMAGE as _SANDBOX_IMAGE, DEFAULT_VERCEL_IMAGE
 _RUN_KW = dict(capture_output=True, text=True, encoding="utf-8", errors="replace")
 
@@ -158,6 +159,33 @@ def _setup_backend_docker(config: dict) -> None:
         _setup.print_info("Skipping egress firewall. You can enable it later with `hermes egress setup`.")
 
 
+def _setup_backend_podman(config: dict) -> None:
+    from tools.environments.base import EnvironmentConnectionError
+    _setup.print_success("Terminal backend: Podman (rootless)")
+    podman_exe = find_podman()
+    _report_binary(podman_exe, "Podman not found in PATH!",
+                   "Install Podman 4.9+: https://podman.io/docs/installation", "Podman found: ")
+    if podman_exe:
+        try:
+            for warning in posture_warnings(probe_posture(podman_exe)):
+                _setup.print_warning(f"  {warning}")
+        except EnvironmentConnectionError as exc:
+            _setup.print_warning(f"  `podman info` failed: {exc}")
+    config["terminal"].setdefault("podman_image", _SANDBOX_IMAGE)
+    _setup._info(None, "Podman sandboxes can be protected with the egress credential firewall.",
+                 "It routes sandbox traffic through iron-proxy so containers receive "
+                 "proxy tokens instead of real API keys. Requires pasta networking.")
+    if _setup.prompt_yes_no("  Enable egress firewall for Podman sandboxes?", False):
+        proxy_cfg = config.setdefault("proxy", {})
+        proxy_cfg["enabled"] = True
+        proxy_cfg["enforce_on_podman"] = True
+        _setup.print_success("Egress firewall enabled in config")
+        _setup.print_info(
+            "Run `hermes egress setup` then `hermes egress start` to mint tokens and launch the proxy.")
+    else:
+        _setup.print_info("Skipping egress firewall. You can enable it later with `hermes egress setup`.")
+
+
 def _setup_backend_modal(config: dict) -> None:
     _setup.print_success("Terminal backend: Modal")
     _setup.print_info("Serverless cloud sandboxes. Each session gets its own container.")
@@ -262,12 +290,14 @@ def _setup_backend_plugin(config: dict, backend: str) -> None:
 
 _BUILTIN_TERMINAL_BACKENDS = [
     ("local", "Local - run directly on this machine (default)"),
-    ("docker", "Docker/Podman - isolated container with configurable resources"),
+    ("docker", "Docker - isolated container"),
     ("modal", "Modal - serverless cloud sandbox"), ("ssh", "SSH - run on a remote machine"),
     ("daytona", "Daytona - persistent cloud development environment"),
-    ("vercel_sandbox", "Vercel Sandbox - cloud microVM with snapshot filesystem persistence")]
+    ("vercel_sandbox", "Vercel Sandbox - cloud microVM with snapshot filesystem persistence"),
+    # Appended, not next to docker: the wizard's menu numbers stay where users and scripts expect them.
+    ("podman", "Podman (rootless) - isolated container, no root daemon")]
 _TERMINAL_BACKEND_SETUP = {
-    "local": _setup_backend_local, "docker": _setup_backend_docker, "modal": _setup_backend_modal,
+    "local": _setup_backend_local, "docker": _setup_backend_docker, "podman": _setup_backend_podman, "modal": _setup_backend_modal,
     "daytona": _setup_backend_daytona, "vercel_sandbox": _setup_backend_vercel, "ssh": _setup_backend_ssh}
 # Backend -> env var mirrored from config after setup (config.yaml is the source of truth, but
 # terminal_tool reads these from .env).

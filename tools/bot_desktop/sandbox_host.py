@@ -89,6 +89,16 @@ def _owner_identity(env: Any) -> dict[str, Any]:
 _ALIVE_CACHE: dict[str, tuple[float, bool]] = {}
 
 
+def _podman_running(stdout: str) -> bool:
+    """``State.Running`` of the first row of ``podman inspect --format json``."""
+    try:
+        rows = json.loads(stdout or "[]")
+    except ValueError:
+        return False
+    row = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else {}
+    return (row.get("State") or {}).get("Running") is True
+
+
 def marker_sandbox_alive(marker: dict[str, Any]) -> bool:
     """Whether the sandbox a marker names still exists. Docker: ``docker inspect`` on the recorded container
     (cached a few seconds; this sits on the browser's per-command path). Other backends (ssh host, apptainer
@@ -101,10 +111,13 @@ def marker_sandbox_alive(marker: dict[str, Any]) -> bool:
     cached = _ALIVE_CACHE.get(container)
     if cached and now - cached[0] < 5.0:
         return cached[1]
+    podman = marker.get("backend") == "PodmanEnvironment"
+    # Podman is read as JSON only (never a template/human rendering); Docker keeps its template probe.
+    fmt = ["--format", "json"] if podman else ["-f", "{{.State.Running}}"]
     try:
-        proc = subprocess.run([marker.get("docker") or "docker", "inspect", "-f", "{{.State.Running}}", container],
+        proc = subprocess.run([marker.get("docker") or "docker", "inspect", *fmt, container],
                               capture_output=True, text=True, timeout=15, check=False, stdin=subprocess.DEVNULL)
-        alive = proc.returncode == 0 and proc.stdout.strip() == "true"
+        alive = proc.returncode == 0 and (_podman_running(proc.stdout) if podman else proc.stdout.strip() == "true")
     except (OSError, subprocess.TimeoutExpired):
         alive = False
     _ALIVE_CACHE[container] = (now, alive)

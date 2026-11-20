@@ -91,6 +91,10 @@ _TERMINAL_ENV_MAPPINGS = {
         "docker_shm_size", "docker_mount_cwd_to_workspace", "docker_network", "docker_run_as_host_user",
         "docker_snap_compat",
         "docker_persist_across_processes", "docker_shared_container_key", "docker_orphan_reaper",
+        "podman_image", "podman_volumes", "podman_env", "podman_forward_env", "podman_extra_args",
+        "podman_shm_size", "podman_network", "podman_persist_across_processes",
+        "podman_shared_container_key", "podman_orphan_reaper", "podman_mount_cwd_to_workspace",
+        "podman_userns", "podman_strict",
         "sandbox_dir", "persistent_shell",
     )
 }

@@ -161,8 +161,10 @@ def default_terminal_scope() -> dict[str, str]:
     managed_terminal = managed_scope.apply_managed_overlay({}).get("terminal")
     if isinstance(managed_terminal, dict):
         _apply_terminal_mapping(scope, managed_terminal)
-        if managed_terminal.get("docker_image") is not None:
-            scope["TERMINAL_DOCKER_IMAGE_PINNED"] = "1"
+        from hermes_cli.sandbox_image_switch import TERMINAL_IMAGE_PIN_SLOTS
+        for image_key, _image_var, pinned_var in TERMINAL_IMAGE_PIN_SLOTS:
+            if managed_terminal.get(image_key) is not None:
+                scope[pinned_var] = "1"
     return scope
 
 
@@ -185,11 +187,14 @@ def build_profile_terminal_scope(
     """
     from hermes_cli import managed_scope
     from hermes_cli.config import _deep_merge
+    from hermes_cli.sandbox_image_switch import TERMINAL_IMAGE_PIN_SLOTS
     from hermes_cli.config_backend import config_exists
 
     home = Path(hermes_home)
     scope = _code_default_terminal_scope()
-    default_image = scope.get("TERMINAL_DOCKER_IMAGE")
+    # One pin verdict per docker-like runtime (docker_image / podman_image), computed by the same rules.
+    default_images = {var: scope.get(var) for _key, var, _pin in TERMINAL_IMAGE_PIN_SLOTS}
+    pin_vars = {pin for _key, _var, pin in TERMINAL_IMAGE_PIN_SLOTS}
     env_path = home / ".env"
     if env_path.exists():
         # load_env_file swallows OSError by design (secret scope fails soft); an unreadable
@@ -206,17 +211,18 @@ def build_profile_terminal_scope(
         scope.update((k, str(v)) for k, v in profile_env.items() if k.startswith("TERMINAL_"))
         # Provenance, not value: an image WRITTEN in the profile's .env is the user's choice even when
         # it spells the default (same rule apply_terminal_config_to_env applies to a set env var).
-        image_pinned = "TERMINAL_DOCKER_IMAGE" in profile_env
+        image_pinned = {pin: var in profile_env for _key, var, pin in TERMINAL_IMAGE_PIN_SLOTS}
     else:
-        image_pinned = False
+        image_pinned = dict.fromkeys(pin_vars, False)
     if env_overlay:
         scope.update((k, str(v)) for k, v in env_overlay.items()
-                     if k.startswith("TERMINAL_") and k != "TERMINAL_DOCKER_IMAGE_PINNED")
+                     if k.startswith("TERMINAL_") and k not in pin_vars)
         # The overlay is the LAUNCHER's environment: its pin verdict is about the launcher's profile and
         # is never inherited, and the bridge backfills TERMINAL_DOCKER_IMAGE for defaults too, so only a
         # value that differs from the default can prove a choice made there.
-        if env_overlay.get("TERMINAL_DOCKER_IMAGE") not in (None, default_image):
-            image_pinned = True
+        for _key, var, pin in TERMINAL_IMAGE_PIN_SLOTS:
+            if env_overlay.get(var) not in (None, default_images[var]):
+                image_pinned[pin] = True
     # Read config.yaml directly, not via read_raw_config() (which collapses "missing" and
     # "unparseable" into {}): present-but-unparseable must fail closed.
     config_path = home / "config.yaml"
@@ -236,15 +242,17 @@ def build_profile_terminal_scope(
         raw_terminal = raw.get("terminal") if isinstance(raw, dict) else None
         if isinstance(raw_terminal, dict):
             _apply_terminal_mapping(scope, raw_terminal)
-            image_pinned = image_pinned or "docker_image" in raw_terminal
+            for key, _var, pin in TERMINAL_IMAGE_PIN_SLOTS:
+                image_pinned[pin] = image_pinned[pin] or key in raw_terminal
     managed_terminal = managed_scope.apply_managed_overlay({}).get("terminal")
     if isinstance(managed_terminal, dict):
         # Managed scope applies last, merged per key into the profile's mapping as load_config() merges
         # them, so a managed docker_env entry keeps the profile's other entries. A null value pins nothing.
         _apply_terminal_mapping(
             scope, _deep_merge(raw_terminal if isinstance(raw_terminal, dict) else {}, managed_terminal))
-        image_pinned = image_pinned or managed_terminal.get("docker_image") is not None
-    scope["TERMINAL_DOCKER_IMAGE_PINNED"] = "1" if image_pinned else "0"
+        for key, _var, pin in TERMINAL_IMAGE_PIN_SLOTS:
+            image_pinned[pin] = image_pinned[pin] or managed_terminal.get(key) is not None
+    scope.update((pin, "1" if pinned else "0") for pin, pinned in image_pinned.items())
     _resolve_scope_cwd_placeholder(scope)
     return scope
 
@@ -259,12 +267,15 @@ def _resolve_scope_cwd_placeholder(scope: dict[str, str]) -> None:
     if scope.get("TERMINAL_CWD"):
         return
     from gateway.cwd_placeholder import resolve_placeholder_terminal_cwd
+    from tools.terminal_tool_config import container_runtime_env_var
 
+    backend = scope.get("TERMINAL_ENV", "")
+    mount_var = container_runtime_env_var(backend.strip().lower(), "MOUNT_CWD_TO_WORKSPACE")
     resolved = resolve_placeholder_terminal_cwd(
-        configured_cwd="", terminal_backend=scope.get("TERMINAL_ENV", ""),
+        configured_cwd="", terminal_backend=backend,
         messaging_cwd=None,
         docker_mount_cwd_to_workspace=scope.get(
-            "TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE", "false").strip().lower() in {"true", "1", "yes"},
+            mount_var, "false").strip().lower() in {"true", "1", "yes"},
         home_fallback=str(Path.home()),
     )
     if resolved:

@@ -80,6 +80,11 @@ proxy:
   # is unavailable.
   enforce_on_docker: true
 
+  # `proxy.enforce_on_podman` (default true): when the proxy is enabled but
+  # unreachable, the Podman backend refuses to start a sandbox. Set to false
+  # to warn and start without the proxy.
+  enforce_on_podman: true
+
   # When `credential_source: bitwarden` but the BWS access token /
   # project_id is missing OR the bws fetch returns no values for mapped
   # providers, the daemon raises by default (matches the spirit of "I

@@ -28,13 +28,15 @@ logger = logging.getLogger(__name__)
 def exec_prefix(env: BaseEnvironment, *, user: Optional[str] = None, interactive: bool = True) -> Optional[list[str]]:
     """Local argv that runs its remainder inside ``env``, or None for backends without one.
 
-    ``user`` selects the sandbox-side account (docker only; ssh runs as the configured login).
+    ``user`` selects the sandbox-side account (docker/podman only; ssh runs as the configured login).
     ``interactive`` keeps stdin open (``docker exec -i``); ssh always does.
     """
     from tools.environments.docker import DockerEnvironment
+    from tools.environments.podman import PodmanEnvironment
     from tools.environments.ssh import SSHEnvironment
 
-    if isinstance(env, DockerEnvironment):
+    # PodmanEnvironment keeps its podman path under Docker's ``_docker_exe``; ``podman exec`` takes the same flags.
+    if isinstance(env, (DockerEnvironment, PodmanEnvironment)):
         container = getattr(env, "_container_id", None)
         if not container:
             return None

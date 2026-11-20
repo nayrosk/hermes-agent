@@ -64,7 +64,7 @@ _CONTAINER_KEYS = (
     ("docker_env", {}), ("docker_run_as_host_user", False), ("docker_extra_args", []),
     ("docker_shm_size", "1g"), ("docker_network", True), ("docker_persist_across_processes", True),
     ("docker_shared_container_key", ""), ("docker_orphan_reaper", True), ("docker_snap_compat", False),
-    ("docker_image_pinned", False),
+    ("docker_image_pinned", False), ("podman_userns", ""), ("podman_strict", False),
 )
 _DOCKER_KWARGS = (
     ("volumes", "docker_volumes", []), ("auto_mount_cwd", "docker_mount_cwd_to_workspace", False),
@@ -74,6 +74,9 @@ _DOCKER_KWARGS = (
     ("shared_container_key", "docker_shared_container_key", ""), ("shm_size", "docker_shm_size", "1g"),
     ("snap_compat", "docker_snap_compat", False), ("image_pinned", "docker_image_pinned", False),
 )
+# Podman reads the same shared docker_* slots (_get_env_config fills them from TERMINAL_PODMAN_*), minus the
+# Docker-only run_as_host_user / snap_compat.
+_PODMAN_KWARGS = tuple(k for k in _DOCKER_KWARGS if k[0] not in ("run_as_host_user", "snap_compat"))
 
 
 def _ssh_config_from_config(config: dict[str, Any]) -> dict:
@@ -162,6 +165,29 @@ def _build_docker_env(*, image, cwd, timeout, cc, task_id, host_cwd, **_):
         except AttributeError:
             pass
     return docker_env_obj
+
+
+def _build_podman_env(*, image, cwd, timeout, cc, task_id, host_cwd, **_):
+    from tools.terminal_tool import (_docker_session_isolation_enabled, _has_isolation_overrides,
+                                     _maybe_reap_podman_orphans)
+    _maybe_reap_podman_orphans(cc)  # one-shot, ``terminal.docker_orphan_reaper`` gated (shared slot)
+    # Same session-isolation rule as _build_docker_env: a session-keyed container must not outlive its session.
+    session_scoped = (_docker_session_isolation_enabled() and task_id != "default"
+                      and not _has_isolation_overrides(task_id))
+    kwargs = {out: cc.get(key, default) for out, key, default in _PODMAN_KWARGS}
+    if session_scoped:
+        kwargs["persist_across_processes"] = False
+    # Imported when selected, like the sandbox rows: the module pulls the whole Podman/egress stack.
+    podman_cls = importlib.import_module("tools.environments.podman").PodmanEnvironment
+    podman_env_obj = podman_cls(image=image, cwd=cwd, timeout=timeout, task_id=task_id, host_cwd=host_cwd,
+                                userns=cc.get("podman_userns", ""), strict=bool(cc.get("podman_strict", False)),
+                                **_resources(cc), **kwargs)
+    if session_scoped:
+        try:
+            podman_env_obj._session_scoped = True
+        except AttributeError:
+            pass
+    return podman_env_obj
 
 
 def _build_modal_env(*, image, cwd, timeout, cc, task_id, **_):
@@ -278,7 +304,7 @@ def _build_plugin_env(*, env_type, image, cwd, timeout, cc, task_id, **_):
 
 
 # Built-in backend -> builder. Anything else is looked up in the plugin registry.
-_ENV_BUILDERS = {"local": _build_local_env, "docker": _build_docker_env, "modal": _build_modal_env,
+_ENV_BUILDERS = {"local": _build_local_env, "docker": _build_docker_env, "podman": _build_podman_env, "modal": _build_modal_env,
                  "daytona": _build_daytona_env, "vercel_sandbox": _build_vercel_env,
                  "ssh": _build_ssh_env}
 
@@ -380,6 +406,8 @@ _BACKEND_SPECS: dict[str, dict[str, Any]] = {
     "local": {},
     "docker": {"binary": (lambda: importlib.import_module("tools.environments.docker").find_docker(), "version",
                           "Docker is not installed — no docker executable in PATH or the usual install locations")},
+    "podman": {"binary": (lambda: importlib.import_module("tools.environments.podman_posture").find_podman(), "version",
+                          "Podman is not installed — no podman executable in PATH")},
     "ssh": {"pre": _ssh_pre},
     "modal": {"pre": _modal_pre,
               "module": ("modal", "modal is required for direct modal terminal backend. Run hermes setup terminal and select Modal.")},
@@ -390,6 +418,7 @@ _BACKEND_SPECS: dict[str, dict[str, Any]] = {
 
 _PROBE_FAILED_REASONS = {
     "docker": "Docker is installed but the Docker daemon is not running",
+    "podman": "Podman is installed but not reachable (on macOS: podman machine start)",
 }
 
 

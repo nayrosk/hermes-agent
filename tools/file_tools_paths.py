@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # "auto"/"cwd" are wizard placeholders). gateway/run.py sanitizes the same set.
 _TERMINAL_CWD_SENTINELS = frozenset({"", ".", "./", "auto", "cwd"})
 # Backend name inferred from the live environment's class name (first match wins).
-_ENV_CLASS_NAME_HINTS = ("local", "ssh", "docker", "modal", "daytona")
+_ENV_CLASS_NAME_HINTS = ("local", "ssh", "docker", "podman", "modal", "daytona")
 # Container task id -> monotonic time of the last failed environment bring-up in path resolution (an SSH
 # home, or a plugin sandbox's ``~`` home).
 _SSH_HOME_RETRY_AFTER = 30.0

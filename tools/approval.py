@@ -1281,8 +1281,10 @@ def _run_approval_gate(
 
 def _should_skip_container_guards(env_type: str, has_host_access: bool = False) -> bool:
     """True when the backend is isolated enough to skip dangerous-command prompts. Docker is the
-    exception once host paths are bind-mounted: ``rm -rf /workspace`` then reaches host files."""
-    if env_type == "docker":
+    exception once host paths are bind-mounted: ``rm -rf /workspace`` then reaches host files; podman
+    follows the same rule (same mount planner, same ``has_host_access`` verdict)."""
+    from tools.terminal_tool_config import is_docker_like_backend
+    if is_docker_like_backend(env_type):
         return not has_host_access
     if env_type in ("modal", "daytona", "vercel_sandbox"):
         return True

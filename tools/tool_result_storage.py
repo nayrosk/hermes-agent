@@ -281,9 +281,9 @@ def _safe_result_filename(tool_use_id: str, ext: str = "txt") -> str:
     return f"{safe_stem}.{ext}"
 
 
-# Built-in backends that publish ``cache/pruned`` (``tools.credential_files._CACHE_DIRS``): docker bind-mounts
-# it, modal/ssh/daytona/vercel_sandbox file-sync it, at the path ``to_agent_visible_cache_path`` names.
-_ARCHIVE_PUBLISHING_BACKENDS = frozenset({"docker", "modal", "ssh", "daytona", "vercel_sandbox"})
+# Built-in backends that publish ``cache/pruned`` (``tools.credential_files._CACHE_DIRS``): docker/podman
+# bind-mount it, modal/ssh/daytona/vercel_sandbox file-sync it, at the path ``to_agent_visible_cache_path`` names.
+_ARCHIVE_PUBLISHING_BACKENDS = frozenset({"docker", "podman", "modal", "ssh", "daytona", "vercel_sandbox"})
 
 
 def _archive_backend() -> str | None:

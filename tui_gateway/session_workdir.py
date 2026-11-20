@@ -511,7 +511,7 @@ def _register_session_cwd(session: dict | None) -> None:
         hints.rebind_working_dir(str(session.get("cwd")))
     with contextlib.suppress(Exception):
         from tools.terminal_tool import _ensure_terminal_env_bridged, register_task_env_overrides
-        from tools.terminal_tool_config import _tenv, _tenv_bool
+        from tools.terminal_tool_config import _tenv, _tenv_bool, container_runtime_env_var, is_docker_like_backend
         cwd, cwd_source = _terminal_task_cwd_with_source(session)
         # The cwd/override record is keyed by the ROUTED home (#123989). session.create is a plain
         # @method, so bind the session's own profile home here or the record lands under the raw key
@@ -528,8 +528,9 @@ def _register_session_cwd(session: dict | None) -> None:
             overrides = {"cwd": cwd, "cwd_source": cwd_source}
             _ensure_terminal_env_bridged()
             try:
-                unmounted_docker = _tenv("TERMINAL_ENV", "local") == "docker" and not _tenv_bool(
-                    "TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE", "false")
+                backend = _tenv("TERMINAL_ENV", "local")
+                unmounted_docker = is_docker_like_backend(backend) and not _tenv_bool(
+                    container_runtime_env_var(backend, "MOUNT_CWD_TO_WORKSPACE"), "false")
             except TerminalPolicyUnavailable:
                 # An unreadable profile's terminal refuses every call anyway: register the cwd as usual
                 # so project tools still find the folder. (register_task_env_overrides writes the record

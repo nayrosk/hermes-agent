@@ -83,7 +83,7 @@ _SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
     },
     "terminal.backend": _select(
         "Terminal execution backend",
-        "local", "docker", "ssh", "modal", "daytona", "vercel_sandbox",
+        "local", "docker", "podman", "ssh", "modal", "daytona", "vercel_sandbox",
     ),
     # sync with _SUPPORTED_VERCEL_RUNTIMES in terminal_tool.py
     "terminal.vercel_image": {
@@ -97,7 +97,7 @@ _SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
     "proxy.enabled": {
         "type": "boolean",
         "description": (
-            "Docker-only egress credential firewall. Requires `hermes egress setup` "
+            "Docker and Podman egress credential firewall. Requires `hermes egress setup` "
             "and `hermes egress start`; Modal/SSH/Daytona are not wired yet."
         ),
         "category": "security",
@@ -105,6 +105,11 @@ _SCHEMA_OVERRIDES: dict[str, dict[str, Any]] = {
     "proxy.credential_source": _select(
         "Where iron-proxy loads real upstream secrets at start time", "env", "bitwarden", category="security"
     ),
+    "proxy.enforce_on_podman": {
+        "type": "boolean",
+        "description": "Refuse Podman sandboxes when egress is enabled but not configured/running or pasta is missing",
+        "category": "security",
+    },
     "proxy.enforce_on_docker": {
         "type": "boolean",
         "description": "Refuse Docker sandboxes when egress is enabled but not configured/running",

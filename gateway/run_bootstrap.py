@@ -595,14 +595,15 @@ def _start_gateway_resolve_terminal_cwd() -> None:
     """Messaging-only defaults belong to startup, not incidental imports by the TUI."""
     import os
     from gateway.cwd_placeholder import CWD_PLACEHOLDERS, resolve_placeholder_terminal_cwd
+    from tools.terminal_tool_config import container_runtime_env_var
     configured_cwd = os.environ.get("TERMINAL_CWD", "")
     if not configured_cwd or configured_cwd in CWD_PLACEHOLDERS:
         resolved_cwd = resolve_placeholder_terminal_cwd(
             configured_cwd=configured_cwd,
             terminal_backend=os.environ.get("TERMINAL_ENV", ""),
             messaging_cwd=os.getenv("MESSAGING_CWD"),
-            docker_mount_cwd_to_workspace=os.getenv(
-                "TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE", "false").lower()
+            docker_mount_cwd_to_workspace=os.getenv(container_runtime_env_var(
+                os.environ.get("TERMINAL_ENV", "").strip().lower(), "MOUNT_CWD_TO_WORKSPACE"), "false").lower()
             in {"true", "1", "yes"},
             home_fallback=str(Path.home()))
         if resolved_cwd is None:

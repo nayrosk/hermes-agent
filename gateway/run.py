@@ -44,7 +44,7 @@ from agent.interrupt_compat import request_hard_interrupt
 from agent.message_metadata import ABSORBED_MESSAGE_UIDS, MESSAGE_UID, copy_identity_fields, is_compaction_scaffolding, replay_metadata_fields
 from agent.turn_context import compression_made_progress
 from agent.session_activity import ActivityProvenance, AwakeIdleMeter
-from hermes_cli.config import _is_ssh_remote_tilde_cwd, cfg_get, config_exists
+from hermes_cli.config import TERMINAL_CONFIG_ENV_MAP, _is_ssh_remote_tilde_cwd, cfg_get, config_exists
 from gateway.run_common import _csv_or_list_to_set
 from hermes_cli.fallback_config import pre_agent_fallback_notice
 from gateway.turn_executor import _UnboundedThreadExecutor
@@ -1907,9 +1907,6 @@ def _platform_has_bot_credential(platform: "Platform", platform_config: "Platfor
     return all(str(extra.get(key) or "").strip() for key in ("homeserver", "user_id", "password"))
 
 
-_DOCKER_VOLUME_SPEC_RE = re.compile(r"^(?P<host>.+):(?P<container>/[^:]+?)(?::(?P<options>[^:]+))?$")
-_DOCKER_MEDIA_OUTPUT_CONTAINER_PATHS = {"/output", "/outputs"}
-
 # Internal bridge, not a config source: seed from the canonical default after dotenv so an ambient
 # process/.env value can never control lease safety.
 from hermes_cli.config_defaults import DEFAULT_CONFIG as _DEFAULT_CONFIG
@@ -1994,7 +1991,9 @@ def _bridge_terminal_config_to_env(_terminal_cfg: dict) -> None:
         "docker_shared_container_key": "TERMINAL_DOCKER_SHARED_CONTAINER_KEY",
         "docker_orphan_reaper": "TERMINAL_DOCKER_ORPHAN_REAPER",
         "sandbox_dir": "TERMINAL_SANDBOX_DIR",
-        "persistent_shell": "TERMINAL_PERSISTENT_SHELL"}
+        "persistent_shell": "TERMINAL_PERSISTENT_SHELL",
+        # Podman's own slots (terminal.podman_* -> TERMINAL_PODMAN_*), from the shared bridge table.
+        **{key: var for key, var in TERMINAL_CONFIG_ENV_MAP.items() if key.startswith("podman_")}}
     for _cfg_key, _env_var in _terminal_env_map.items():
         if _cfg_key not in _terminal_cfg:
             continue
@@ -2171,6 +2170,7 @@ from gateway.platforms.base import (
     _reply_anchor_for_event,
     _terminal_sentinel_start,
 )
+from gateway.platforms.docker_media_paths import warn_if_media_delivery_is_risky
 from gateway.platforms.event import MessageEvent, MessageType
 from gateway.restart import (
     DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT,
@@ -3517,34 +3517,9 @@ class GatewayRunner(
                 "Teams pipeline runtime unavailable: %s", self._teams_pipeline_runtime_error)
 
     def _warn_if_docker_media_delivery_is_risky(self) -> None:
-        """Warn when Docker-backed gateways lack an explicit export mount: MEDIA delivery runs in the
-        gateway process, so model-emitted paths like `/output/report.txt` must be host-readable."""
-        if os.getenv("TERMINAL_ENV", "").strip().lower() != "docker":
-            return
-        connected = self.config.get_connected_platforms()
-        messaging_platforms = [p for p in connected if p not in {Platform.LOCAL, Platform.API_SERVER, Platform.WEBHOOK}]
-        if not messaging_platforms:
-            return
-
-        raw_volumes = os.getenv("TERMINAL_DOCKER_VOLUMES", "").strip()
-        volumes: list[str] = []
-        if raw_volumes:
-            try:
-                parsed = json.loads(raw_volumes)
-                if isinstance(parsed, list):
-                    volumes = [str(v) for v in parsed if isinstance(v, str)]
-            except Exception:
-                logger.debug("Could not parse TERMINAL_DOCKER_VOLUMES for gateway media warning", exc_info=True)
-
-        for spec in volumes:
-            match = _DOCKER_VOLUME_SPEC_RE.match(spec)
-            if match and match.group("container") in _DOCKER_MEDIA_OUTPUT_CONTAINER_PATHS:
-                return
-        logger.warning(
-            "Docker backend is enabled for the messaging gateway but no explicit host-visible "
-            "output mount (for example '/home/user/.hermes/cache/documents:/output') is configured. "
-            "This is fine if the model already emits host-visible paths, but MEDIA file delivery can fail "
-            "for container-local paths like '/workspace/...' or '/output/...'.")
+        """Warn when Docker/Podman-backed gateways lack an explicit export mount (see warn_if_media_delivery_is_risky)."""
+        warn_if_media_delivery_is_risky(lambda: [
+            p for p in self.config.get_connected_platforms() if p not in {Platform.LOCAL, Platform.API_SERVER, Platform.WEBHOOK}])
 
     _VOICE_MODE_PATH = _hermes_home / "gateway_voice_mode.json"
 

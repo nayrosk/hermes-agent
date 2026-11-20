@@ -13,7 +13,10 @@ from hermes_cli.doctor_platform import _system_package_install_cmd
 from hermes_cli.doctor_report import Finding, _fail_and_issue, check_bool, check_info, check_ok, check_warn, doctor_check
 from hermes_cli.vercel_auth import describe_vercel_auth
 from hermes_constants import is_termux as _is_termux
+from tools.environments.base import EnvironmentConnectionError
 from tools.environments.docker import docker_runtime_name, docker_runtime_start_hint, find_docker
+from tools.environments.podman_posture import find_podman, posture_warnings, probe_posture
+from tools.terminal_tool_config import is_docker_like_backend
 
 
 def _safe_which(cmd: str) -> str | None:
@@ -184,7 +187,7 @@ def _check_git_and_rg(should_fix: bool, f: Finding) -> None:
         check_info(f"Install for faster search: {_system_package_install_cmd('ripgrep')}")
 
 
-_BUILTIN_TERMINAL_BACKENDS = {"local", "docker", "modal", "managed_modal", "daytona", "vercel_sandbox", "ssh"}
+_BUILTIN_TERMINAL_BACKENDS = {"local", "docker", "podman", "modal", "managed_modal", "daytona", "vercel_sandbox", "ssh"}
 
 
 def _check_docker_backend(terminal_env: str, running_in_container: bool, issues: list[str]) -> None:
@@ -211,6 +214,34 @@ def _check_docker_backend(terminal_env: str, running_in_container: bool, issues:
         check_info("Docker backend is not available inside Termux (expected on Android)")
     elif not running_in_container:  # in-container case already explained by the caller
         check_warn("Docker/Podman not found", "(optional)")
+
+
+def _check_podman_backend(terminal_env: str, issues: list[str]) -> None:
+    """Posture problems warn (the backend still runs); they become issues only under
+    ``terminal.podman_strict`` or when egress is enabled but pasta is missing."""
+    if terminal_env != "podman":
+        return
+    podman_exe = find_podman()
+    if not podman_exe:
+        return _fail_and_issue("Podman not installed", "(needed for the 'podman' terminal backend)",
+                               "Install Podman (4.9+), or run `hermes setup terminal` to switch backend.", issues)
+    try:
+        posture = probe_posture(podman_exe)
+    except EnvironmentConnectionError as exc:
+        return _fail_and_issue("Podman not usable", f"({exc})",
+                               "Fix `podman info`, or run `hermes setup terminal` to switch backend.", issues)
+    from hermes_cli.config import cfg_get, load_config_readonly
+    config = load_config_readonly()
+    check_ok("Podman", f"({posture.version}, {'rootless' if posture.rootless else 'rootful'}, network: {posture.network_cmd})")
+    warnings = posture_warnings(posture)
+    for warning in warnings:
+        check_warn(warning)
+    if warnings and cfg_get(config, "terminal", "podman_strict"):
+        issues.append("terminal.podman_strict is on and Podman has posture warnings: the backend will refuse to start. "
+                      "Fix the warnings above or set terminal.podman_strict: false.")
+    if cfg_get(config, "proxy", "enabled") and not posture.pasta_available:
+        issues.append("Egress firewall is enabled but pasta is not installed: Podman sandboxes would be refused. "
+                      "Install pasta (the `passt` package), or set proxy.enforce_on_podman: false.")
 
 
 def _check_ssh_backend(issues: list[str]) -> None:
@@ -300,11 +331,12 @@ def _check_terminal_backend(should_fix: bool, f: Finding) -> None:
     except Exception:
         running_in_container = False
     # In our container docker-in-docker isn't set up, so local is intended: skip the noisy "Docker/Podman not found"
-    # warning. An explicit TERMINAL_ENV=docker (mounted docker.sock) still gets checked.
-    if running_in_container and terminal_env != "docker":
+    # warning. An explicit TERMINAL_ENV=docker/podman (mounted socket / nested podman) still gets checked.
+    if running_in_container and not is_docker_like_backend(terminal_env):
         check_info("Running inside a container — using local terminal backend (docker-in-docker is not configured by default)")
         terminal_env = "local"
     _check_docker_backend(terminal_env, running_in_container, f.issues)
+    _check_podman_backend(terminal_env, f.issues)
     if terminal_env in _BACKEND_CHECKS:
         _BACKEND_CHECKS[terminal_env](f.issues)
     elif terminal_env not in _BUILTIN_TERMINAL_BACKENDS:

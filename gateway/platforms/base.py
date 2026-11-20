@@ -26,6 +26,7 @@ from gateway.platforms.base_kanban_media import _kanban_attachment_roots, _kanba
 from gateway.runtime_footer import footer_onto_photo_caption, send_footer_unless_captioned
 from gateway.platforms.session_model import _SessionModelSettingsMixin
 from utils import normalize_proxy_url, unlink_files_older_than
+from tools.terminal_tool_config import container_runtime_env_var, is_docker_like_backend
 from agent.file_safety import is_project_env_basename
 from agent.i18n import t
 from agent.retry_utils import jittered_backoff
@@ -909,9 +910,8 @@ def _tenv(name: str, default: str = "") -> str:
 
 
 def _parse_docker_volume_mounts() -> list[tuple[Path, Path]]:
-    """Parse ``TERMINAL_DOCKER_VOLUMES`` (JSON list of ``host:container[:mode]``) into
-    ``(host_path, container_path)``; named volumes / non-absolute hosts can't resolve here."""
-    raw = _tenv("TERMINAL_DOCKER_VOLUMES", "").strip()
+    """The docker-like backend's ``TERMINAL_*_VOLUMES`` (JSON ``host:container[:mode]``) as ``(host, container)`` paths; named volumes / relative hosts can't resolve here."""
+    raw = _tenv(container_runtime_env_var(_tenv("TERMINAL_ENV", "").strip().lower(), "VOLUMES"), "").strip()
     try:
         import json as _json
         parsed = _json.loads(raw) if raw else []
@@ -938,11 +938,11 @@ _TRUTHY = {"1", "true", "yes", "on"}
 
 
 def _docker_env_active() -> bool:
-    return _tenv("TERMINAL_ENV", "").strip().lower() == "docker"
+    return is_docker_like_backend(_tenv("TERMINAL_ENV", "").strip().lower())
 
 
 def _docker_persistent_active() -> bool:
-    """Docker backend with persistent containers (the default) enabled."""
+    """Docker-like backend with persistent containers (the default) enabled."""
     return _docker_env_active() and _tenv("TERMINAL_CONTAINER_PERSISTENT", "true").strip().lower() in _TRUTHY
 
 

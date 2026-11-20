@@ -18,6 +18,7 @@ from pathlib import Path
 from agent.file_safety import deny_key, get_nt_namespace_error
 from hermes_constants import get_hermes_home, named_profile_home
 from tools import file_state
+from tools.terminal_tool_config import is_docker_like_backend
 from tools.binary_extensions import (
     has_binary_extension,
     has_opaque_document_extension,
@@ -430,13 +431,13 @@ def _get_container_mirror_prefix_for_task(task_id: str = "default") -> str | Non
         with _env_lock:
             env = _active_environments.get(container_key) or _active_environments.get(task_id)
         if env is not None:
-            persistent_docker = (env.__class__.__name__ == "DockerEnvironment"
+            persistent_docker = (env.__class__.__name__ in ("DockerEnvironment", "PodmanEnvironment")
                                  and bool(getattr(env, "_persistent", False)))
             return "/root/.hermes" if persistent_docker else None
         config = _get_env_config()
     except Exception:
         return None
-    if config.get("env_type") == "docker" and config.get("container_persistent", True):
+    if is_docker_like_backend(config.get("env_type")) and config.get("container_persistent", True):
         return "/root/.hermes"
     return None
 

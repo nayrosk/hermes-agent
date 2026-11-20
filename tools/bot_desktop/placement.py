@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 GATEWAY = "gateway"
 TERMINAL = "terminal"
 REFUSED = "refused"
-_STREAM_BACKENDS = ("docker", "ssh")
+_STREAM_BACKENDS = ("docker", "podman", "ssh")
 
 
 @dataclass(frozen=True)

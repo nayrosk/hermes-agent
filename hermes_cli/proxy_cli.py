@@ -270,6 +270,7 @@ def _setup_write_config(console: Console, args: argparse.Namespace, mappings, ca
     proxy_cfg["enabled"] = True
     proxy_cfg.setdefault("auto_install", True)
     proxy_cfg.setdefault("enforce_on_docker", True)
+    proxy_cfg.setdefault("enforce_on_podman", True)
     # CRITICAL: never silently downgrade credential_source on re-run. A previous
     # ``--from-bitwarden`` setup keeps bitwarden mode (the documented rotation guarantee)
     # unless the operator passes an explicit --no-bitwarden.
@@ -639,4 +640,5 @@ def _status_rows(proxy_cfg: dict, status, *, yn, dim) -> list[tuple[str, str]]:
         ("Listening", yn(status.listening)),
         ("Credential src", str(proxy_cfg.get("credential_source", "env"))),
         ("Docker enforce", yn(bool(proxy_cfg.get("enforce_on_docker", True)))),
+        ("Podman enforce", yn(bool(proxy_cfg.get("enforce_on_podman", True)))),
     ]

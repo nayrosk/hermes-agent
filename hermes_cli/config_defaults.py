@@ -1,3 +1,4 @@
+# health: allow FILE_LINES -- podman backend: its terminal.podman_* and proxy.enforce_on_podman defaults must live in DEFAULT_CONFIG (hermes_cli/AGENTS.md: every key is registered here, and its comments are the config.yaml docs); the growth is only those keys and their comments
 """Default configuration data for Hermes Agent: DEFAULT_CONFIG and OPTIONAL_ENV_VARS.
 
 Pure-data leaf module — must not import from hermes_cli.config. Comments are the user-facing
@@ -372,6 +373,23 @@ DEFAULT_CONFIG = {
         "docker_snap_compat": False,
         # Trusted profiles sharing one Docker container identity; empty = per-profile boundary.
         "docker_shared_container_key": "",
+        # Rootless Podman backend (terminal.backend: podman). Mirrors the docker_* knobs above;
+        # the shared container-runtime code reads these through the same slots.
+        "podman_image": DEFAULT_SANDBOX_IMAGE,
+        "podman_volumes": [],
+        "podman_env": {},
+        "podman_forward_env": [],
+        "podman_extra_args": [],
+        "podman_shm_size": "1g",
+        "podman_network": True,  # false = --network=none
+        "podman_persist_across_processes": True,
+        "podman_shared_container_key": "",
+        "podman_orphan_reaper": True,
+        "podman_mount_cwd_to_workspace": False,
+        # "" (default: container root = host user), "keep-id" or "auto".
+        "podman_userns": "",
+        # True: refuse to start on rootless posture problems instead of warning.
+        "podman_strict": False,
         # SSH: carry exported env vars between commands (cwd always carries). false = every command
         # starts from the login env, profile functions included. Local: TERMINAL_LOCAL_PERSISTENT.
         "persistent_shell": True,
@@ -2549,6 +2567,8 @@ DEFAULT_CONFIG = {
         # True: the Docker backend refuses to start a sandbox if the proxy is enabled but not
         # running. False: fall back to direct outbound with real credentials.
         "enforce_on_docker": True,
+        # Same as enforce_on_docker, for the Podman backend.
+        "enforce_on_podman": True,
         # With credential_source bitwarden, a missing BWS token/project_id or an empty fetch makes
         # the daemon raise. True silently falls back to host env (useful mid-migration). A leftover
         # fail_on_uncovered_providers key is ignored.

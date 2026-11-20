@@ -35,6 +35,7 @@ from hermes_cli import managed_scope
 from hermes_cli.default_soul import DEFAULT_SOUL_MD, is_legacy_template_soul
 from hermes_cli.left_core_migration import profile_env_names as _left_core_profile_env
 from hermes_cli.secret_prompt import masked_secret_prompt
+from hermes_cli.sandbox_image_switch import bridge_image_pins
 # Managed-mode, container and HERMES_UID/GID policy live in hermes_constants (import-safe);
 # re-exported here so existing callers/patch targets keep working.
 from hermes_constants import (
@@ -1919,7 +1920,11 @@ TERMINAL_CONFIG_ENV_MAP = {
             "docker_volumes", "docker_env", "docker_mount_cwd_to_workspace", "docker_network",
             "docker_extra_args", "docker_shm_size", "docker_run_as_host_user", "docker_snap_compat",
             "docker_persist_across_processes", "docker_shared_container_key",
-            "docker_orphan_reaper", "sandbox_dir", "persistent_shell", "home_mode")}}
+            "docker_orphan_reaper",
+            "podman_image", "podman_volumes", "podman_env", "podman_forward_env", "podman_extra_args",
+            "podman_shm_size", "podman_network", "podman_persist_across_processes",
+            "podman_shared_container_key", "podman_orphan_reaper", "podman_mount_cwd_to_workspace",
+            "podman_userns", "podman_strict", "sandbox_dir", "persistent_shell", "home_mode")}}
 
 
 def _terminal_env_value(value: Any) -> str:
@@ -1980,14 +1985,7 @@ def apply_terminal_config_to_env(
     if not (config is not None or "backend" in raw_terminal_cfg):
         backend_sources = backend_sources[::-1]  # env wins when the file did not set backend
     terminal_backend = str(backend_sources[0] or backend_sources[1] or "")
-    # Whether docker_image is the user's choice (config.yaml key, or TERMINAL_DOCKER_IMAGE set before
-    # any bridge ran) or the shipped default. DockerEnvironment recreates a persisted container on
-    # image mismatch only for a pinned image; a default flip keeps the user's sandbox and asks.
-    # Children inherit both vars, so a launcher's verdict is kept unless the file pins it.
-    if should_override and "docker_image" in explicit_keys:
-        target["TERMINAL_DOCKER_IMAGE_PINNED"] = "1"
-    elif "TERMINAL_DOCKER_IMAGE_PINNED" not in target:
-        target["TERMINAL_DOCKER_IMAGE_PINNED"] = "1" if "TERMINAL_DOCKER_IMAGE" in target else "0"
+    bridge_image_pins(target, explicit_keys, should_override=should_override)
 
     for cfg_key, env_var in TERMINAL_CONFIG_ENV_MAP.items():
         if cfg_key not in terminal_cfg:

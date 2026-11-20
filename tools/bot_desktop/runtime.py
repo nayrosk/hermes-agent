@@ -31,6 +31,7 @@ from typing import Callable, Dict, Optional
 from agent.deadline import poll_until
 from hermes_constants import get_hermes_home
 from tools.bot_desktop import placement
+from tools.terminal_tool_config import is_docker_like_backend
 
 logger = logging.getLogger(__name__)
 
@@ -665,7 +666,7 @@ def _sandbox_status(profile: Optional[str], where) -> DesktopStatus:
             f"plus the desktop stack)")
         blocker = (f"The terminal backend's sandbox image lacks {', '.join(missing)}. {advice[0].upper()}{advice[1:]}, "
                    f"or set bot_desktop.placement: gateway.")
-        if where.backend == "docker":
+        if is_docker_like_backend(where.backend):
             # The usual reason on an upgraded install: the persisted container predates the default
             # flip and was kept on purpose. The pane offers the switch instead of a config hint.
             from hermes_cli.sandbox_image_switch import pending

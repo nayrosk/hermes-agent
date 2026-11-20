@@ -47,8 +47,8 @@ from tools.terminal_tool_lifecycle import (
 from tools.terminal_tool_config import (
     _is_container_backend, _is_host_cwd, _is_mounted_host_cwd, _is_unusable_container_cwd,
     _is_windows_drive_path, _parse_env_var, _plugin_env_flag, _quiet, _safe_getcwd, _tenv, _tenv_bool,
-    _in_sandbox_home, coerce_ssh_remote_cwd, home_profile_name, profile_container_key,
-    translate_mounted_host_path,
+    _in_sandbox_home, coerce_ssh_remote_cwd, container_runtime_env_var, home_profile_name, is_docker_like_backend,
+    profile_container_key, translate_mounted_host_path,
 )
 from tools.terminal_tool_backends import (
     _REQUIREMENT_CHECKERS, _VERCEL_SANDBOX_DEFAULT_CWD, _check_plugin_requirements,
@@ -154,8 +154,8 @@ def _docker_volume_uses_host_path(volume_spec: str) -> bool:
 
 
 def _docker_has_host_access(config: dict[str, Any]) -> bool:
-    """Return True when a Docker sandbox exposes host paths through bind mounts."""
-    if config.get("env_type") != "docker":
+    """Return True when a docker-like (docker/podman) sandbox exposes host paths through bind mounts."""
+    if not is_docker_like_backend(config.get("env_type")):
         return False
     # With the flag on, a session's own workspace is bound at /workspace even when the launch dir
     # is not (a backend launched under /root has no config host_cwd): never assume an empty sandbox.
@@ -240,6 +240,41 @@ def _maybe_reap_docker_orphans(container_config: dict[str, Any]) -> None:
                 "Docker orphan reaper removed %d stale container(s) for profile %s",
                 removed, profile,
             )
+
+
+_podman_orphan_reaper_ran = False
+_podman_orphan_reaper_lock = threading.Lock()
+
+
+def _maybe_reap_podman_orphans(container_config: dict[str, Any]) -> None:
+    """Podman twin of :func:`_maybe_reap_docker_orphans`: once per process, gated by the shared
+    ``terminal.docker_orphan_reaper`` slot, sweeping only ``hermes-podman=1`` containers."""
+    global _podman_orphan_reaper_ran
+    if not container_config.get("docker_orphan_reaper", True):
+        return
+    if _podman_orphan_reaper_ran:
+        return
+    with _podman_orphan_reaper_lock:
+        if _podman_orphan_reaper_ran:
+            return
+        _podman_orphan_reaper_ran = True
+
+    try:
+        lifetime = int(_tenv("TERMINAL_LIFETIME_SECONDS", "300"))
+    except (TypeError, ValueError):
+        lifetime = 300
+    max_age = max(60, lifetime) * 2
+
+    try:
+        from tools.environments.docker import _container_identity
+        from tools.environments.podman import reap_podman_orphans
+    except ImportError:
+        return
+    with _quiet("Podman orphan reaper raised"):
+        profile = _container_identity(container_config.get("docker_shared_container_key", ""))
+        removed = reap_podman_orphans(max_age_seconds=max_age, profile_filter=profile)
+        if removed:
+            logger.info("Podman orphan reaper removed %d stale container(s) for profile %s", removed, profile)
 
 
 # Per-task environment overrides (never exposed to the model). RL/benchmark
@@ -447,7 +482,7 @@ class _SessionScope:
 
     @property
     def session_isolated(self) -> bool:
-        if self.env_type != "docker" and not _plugin_env_flag(
+        if not is_docker_like_backend(self.env_type) and not _plugin_env_flag(
             self.env_type, "session_isolated_when_nonpersistent"
         ):
             return False
@@ -455,11 +490,11 @@ class _SessionScope:
 
     @property
     def docker_session_isolated(self) -> bool:
-        return self.env_type == "docker" and self.session_isolated
+        return is_docker_like_backend(self.env_type) and self.session_isolated
 
     @property
     def docker_profile_scoped(self) -> bool:
-        return self.env_type == "docker" and self.persistent
+        return is_docker_like_backend(self.env_type) and self.persistent
 
 
 def _session_scope() -> _SessionScope:
@@ -579,7 +614,8 @@ def _resolve_container_task_id(task_id: Optional[str]) -> str:
     # stay authoritative where they apply and this only covers the cases that would otherwise collapse to
     # the shared "default" key (notably SSH).
     session_key = _current_session_key()
-    shared = _tenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "").strip() if scope.docker_profile_scoped else ""
+    shared_var = container_runtime_env_var(scope.env_type, "SHARED_CONTAINER_KEY")
+    shared = _tenv(shared_var, "").strip() if scope.docker_profile_scoped else ""
     if shared:
         # Explicit opt-in: trusted profiles configuring the same terminal.docker_shared_container_key share
         # ONE container/cache slot (and sandbox dir) regardless of profile name (#84671).
@@ -623,7 +659,7 @@ def _workspace_container_key(base: str, task_id: Optional[str]) -> str:
         return task_id
     # Without the cwd mount nothing is bound into the container: a registered workspace (a
     # Desktop session's folder) must not split the profile's sandbox from its CLI files.
-    if not _tenv_bool("TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE", "false"):
+    if not _tenv_bool(container_runtime_env_var(_tenv("TERMINAL_ENV", "local"), "MOUNT_CWD_TO_WORKSPACE"), "false"):
         return base
     for key in dict.fromkeys((task_id, _resolve_container_alias(task_id))):
         overrides = _task_env_overrides.get(_qualify_task_key(key))
@@ -664,6 +700,7 @@ def resolve_task_overrides(task_id: Optional[str]) -> dict[str, Any]:
 # Backends that take an image, keyed to the override/config key carrying it.
 _IMAGE_KEY_BY_BACKEND = {
     "docker": "docker_image",
+    "podman": "podman_image",
     "modal": "modal_image",
     "daytona": "daytona_image",
 }
@@ -742,7 +779,7 @@ def _resolve_task_host_cwd(config: dict[str, Any], task_id: Optional[str]) -> Op
     back to the sanitized config cwd. The Windows bind, including when
     ``/workspace`` is already claimed, is the volume mount, not this override.
     """
-    if config.get("env_type") != "docker" or not config.get("docker_mount_cwd_to_workspace"):
+    if not is_docker_like_backend(config.get("env_type")) or not config.get("docker_mount_cwd_to_workspace"):
         return None
     # Top-level CLI parent ("default") is a single-session process — legacy behavior.
     if not _docker_session_isolation_enabled() or _resolve_container_task_id(task_id) == "default":
@@ -851,7 +888,7 @@ def _resolve_config_cwd(env_type: str, mount_docker_cwd: bool) -> tuple:
     if cwd and cwd != default_cwd and not _is_ssh_remote_tilde_cwd(env_type, cwd) and hosted_scope() is None:
         cwd = os.path.expanduser(cwd)
     host_cwd = None
-    if env_type == "docker" and mount_docker_cwd:
+    if is_docker_like_backend(env_type) and mount_docker_cwd:
         candidate = os.path.abspath(os.path.expanduser(_tenv("TERMINAL_CWD") or _safe_getcwd()))
         if (
             _is_host_cwd(candidate)
@@ -859,7 +896,7 @@ def _resolve_config_cwd(env_type: str, mount_docker_cwd: bool) -> tuple:
         ):
             host_cwd = candidate
             cwd = "/workspace"
-    elif env_type == "docker" and _is_windows_drive_path(cwd):
+    elif is_docker_like_backend(env_type) and _is_windows_drive_path(cwd):
         # A Windows workspace cannot exist inside the Linux container. Bind it
         # even when docker_mount_cwd_to_workspace is off; the env retargets cwd
         # to the mount (which may not be /workspace).
@@ -887,7 +924,10 @@ def _get_env_config() -> dict[str, Any]:
     from hermes_cli.config_defaults import DEFAULT_SANDBOX_IMAGE as default_image
     _ensure_terminal_env_bridged()
     env_type = _tenv("TERMINAL_ENV", "local")
-    mount_docker_cwd = _tenv_bool("TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE", "false")
+    # The ``docker_*`` dict keys below are the shared container-runtime slots for docker-like
+    # backends: for podman they are filled from ``TERMINAL_PODMAN_*`` instead of ``TERMINAL_DOCKER_*``.
+    rt = "PODMAN" if env_type == "podman" else "DOCKER"
+    mount_docker_cwd = _tenv_bool(container_runtime_env_var(env_type, "MOUNT_CWD_TO_WORKSPACE"), "false")
 
     # Container/docker-only payloads are parsed only when such a backend is
     # selected: a stale or invalid Docker value bridged from config.yaml must
@@ -899,14 +939,20 @@ def _get_env_config() -> dict[str, Any]:
     else:
         container_cpu, container_memory, container_disk = 1.0, 5120, 51200
 
-    if env_type == "docker":
-        docker_forward_env = _parse_env_var("TERMINAL_DOCKER_FORWARD_ENV", "[]", json.loads, "valid JSON")
-        docker_volumes = _parse_env_var("TERMINAL_DOCKER_VOLUMES", "[]", json.loads, "valid JSON")
-        docker_env = _parse_env_var("TERMINAL_DOCKER_ENV", "{}", json.loads, "valid JSON")
-        docker_extra_args = _parse_env_var("TERMINAL_DOCKER_EXTRA_ARGS", "[]", json.loads, "valid JSON")
-        docker_shm_size = _tenv("TERMINAL_DOCKER_SHM_SIZE", "1g")
+    if is_docker_like_backend(env_type):
+        docker_forward_env = _parse_env_var(f"TERMINAL_{rt}_FORWARD_ENV", "[]", json.loads, "valid JSON")
+        docker_volumes = _parse_env_var(f"TERMINAL_{rt}_VOLUMES", "[]", json.loads, "valid JSON")
+        docker_env = _parse_env_var(f"TERMINAL_{rt}_ENV", "{}", json.loads, "valid JSON")
+        docker_extra_args = _parse_env_var(f"TERMINAL_{rt}_EXTRA_ARGS", "[]", json.loads, "valid JSON")
+        docker_shm_size = _tenv(f"TERMINAL_{rt}_SHM_SIZE", "1g")
     else:
         docker_forward_env, docker_volumes, docker_env, docker_extra_args, docker_shm_size = [], [], {}, [], "1g"
+
+    podman_userns = _tenv("TERMINAL_PODMAN_USERNS", "").strip()
+    if env_type == "podman" and podman_userns not in ("", "keep-id", "auto"):
+        raise ValueError(
+            f"Invalid terminal.podman_userns {podman_userns!r}: expected '', 'keep-id' or 'auto'"
+        )
 
     cwd, host_cwd = _resolve_config_cwd(env_type, mount_docker_cwd)
 
@@ -914,7 +960,11 @@ def _get_env_config() -> dict[str, Any]:
         "env_type": env_type,
         "modal_mode": coerce_modal_mode(_tenv("TERMINAL_MODAL_MODE", "auto")),
         "docker_image": _tenv("TERMINAL_DOCKER_IMAGE", default_image),
-        "docker_image_pinned": _tenv("TERMINAL_DOCKER_IMAGE_PINNED", "0") == "1",
+        "podman_image": _tenv("TERMINAL_PODMAN_IMAGE", default_image),
+        "podman_userns": podman_userns,
+        "podman_strict": _tenv_bool("TERMINAL_PODMAN_STRICT", "false"),
+        # Shared slot: podman's verdict is about podman_image (TERMINAL_PODMAN_IMAGE_PINNED).
+        "docker_image_pinned": _tenv(container_runtime_env_var(env_type, "IMAGE_PINNED"), "0") == "1",
         "docker_forward_env": docker_forward_env,
         "modal_image": _tenv("TERMINAL_MODAL_IMAGE", default_image),
         "daytona_image": _tenv("TERMINAL_DAYTONA_IMAGE", default_image),
@@ -945,14 +995,14 @@ def _get_env_config() -> dict[str, Any]:
         "docker_env": docker_env,
         "docker_run_as_host_user": _tenv_bool("TERMINAL_DOCKER_RUN_AS_HOST_USER", "false"),
         "docker_snap_compat": _tenv_bool("TERMINAL_DOCKER_SNAP_COMPAT", "false"),
-        "docker_network": _tenv_bool("TERMINAL_DOCKER_NETWORK", "true"),
+        "docker_network": _tenv_bool(f"TERMINAL_{rt}_NETWORK", "true"),
         "docker_extra_args": docker_extra_args,
         "docker_shm_size": docker_shm_size,
         # Cross-process reuse: attach to a labeled container at startup
         # instead of starting fresh; false = per-process isolation.
-        "docker_persist_across_processes": _tenv_bool("TERMINAL_DOCKER_PERSIST_ACROSS_PROCESSES", "true"),
-        "docker_shared_container_key": _tenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "").strip(),
-        "docker_orphan_reaper": _tenv_bool("TERMINAL_DOCKER_ORPHAN_REAPER", "true"),
+        "docker_persist_across_processes": _tenv_bool(f"TERMINAL_{rt}_PERSIST_ACROSS_PROCESSES", "true"),
+        "docker_shared_container_key": _tenv(f"TERMINAL_{rt}_SHARED_CONTAINER_KEY", "").strip(),
+        "docker_orphan_reaper": _tenv_bool(f"TERMINAL_{rt}_ORPHAN_REAPER", "true"),
     }
 
 
@@ -1009,6 +1059,9 @@ def _atexit_cleanup():
     if "tools.environments.docker" in sys.modules:
         with _quiet("teardown drain raised on exit"):
             sys.modules["tools.environments.docker"].DockerEnvironment.wait_for_all_teardowns(timeout=15.0)
+    if "tools.environments.podman" in sys.modules:
+        with _quiet("podman teardown drain raised on exit"):
+            sys.modules["tools.environments.podman"].PodmanEnvironment.wait_for_all_teardowns(timeout=15.0)
 
 atexit.register(_atexit_cleanup)
 

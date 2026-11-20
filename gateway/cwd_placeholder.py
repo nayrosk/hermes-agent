@@ -9,6 +9,8 @@ Docker with workspace mounting still needs an explicit host path signal
 
 from __future__ import annotations
 
+from tools.terminal_tool_config import is_docker_like_backend
+
 CWD_PLACEHOLDERS = frozenset({".", "auto", "cwd"})
 
 
@@ -22,7 +24,7 @@ def resolve_placeholder_terminal_cwd(
 ) -> str | None:
     """Return the ``TERMINAL_CWD`` value to set, or ``None`` to leave it unset.
 
-    local + placeholder → ``MESSAGING_CWD`` or ``home_fallback``; docker +
+    local + placeholder → ``MESSAGING_CWD`` or ``home_fallback``; docker/podman +
     placeholder + mount on + host ``MESSAGING_CWD`` → that host path (for the
     ``/workspace`` mapping); any other non-local backend → ``None`` (sandbox default).
     """
@@ -32,6 +34,6 @@ def resolve_placeholder_terminal_cwd(
     messaging = (messaging_cwd or "").strip()
     if backend == "local":
         return messaging or home_fallback
-    if backend == "docker" and docker_mount_cwd_to_workspace and messaging and messaging not in CWD_PLACEHOLDERS:
+    if is_docker_like_backend(backend) and docker_mount_cwd_to_workspace and messaging and messaging not in CWD_PLACEHOLDERS:
         return messaging
     return None

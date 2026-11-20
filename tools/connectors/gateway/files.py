@@ -40,8 +40,8 @@ FILE_INPUT_NOTE = "Pass a local file path."
 _ARRAY_ITEM = "*"
 _MAX_SCHEMA_DEPTH = 32
 # Terminal backends whose files this machine can read, as media delivery reads them: the host, and
-# Docker through its mounts. The others keep the model's files on another machine.
-_HOST_READABLE_BACKENDS = frozenset({"local", "docker"})
+# Docker/Podman through their mounts. The others keep the model's files on another machine.
+_HOST_READABLE_BACKENDS = frozenset({"local", "docker", "podman"})
 _UNSAFE_NAME_CHARS = re.compile(r"[\x00-\x1f\x7f<>:\"|?*\\/]")
 _MAX_NAME_CHARS = 150
 

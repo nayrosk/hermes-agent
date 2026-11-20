@@ -152,8 +152,26 @@ def cwd_follows_host_mount(cwd: str, mount: str) -> bool:
         return True
     return cwd == "/workspace" and mount != "/workspace"
 
-_CONTAINER_BACKENDS = frozenset({"docker", "modal", "daytona", "vercel_sandbox"})
+_CONTAINER_BACKENDS = frozenset({"docker", "podman", "modal", "daytona", "vercel_sandbox"})
+# Backends driven by a docker-compatible CLI; they share the ``docker_*`` config slots.
+DOCKER_LIKE_BACKENDS: frozenset[str] = frozenset({"docker", "podman"})
 _BUILTIN_BACKENDS = _CONTAINER_BACKENDS | {"local", "ssh", "managed_modal"}
+
+
+def is_docker_like_backend(env_type: str | None) -> bool:
+    """True for backends that run through a docker-compatible CLI (docker, podman)."""
+    return env_type in DOCKER_LIKE_BACKENDS
+
+
+def container_runtime_env_var(env_type: str | None, suffix: str) -> str:
+    """The ``TERMINAL_*`` var behind a shared container slot: ``TERMINAL_PODMAN_<suffix>`` under podman,
+    else Docker's ``TERMINAL_DOCKER_<suffix>`` (the pre-podman name every other caller keeps reading)."""
+    return f"TERMINAL_{'PODMAN' if env_type == 'podman' else 'DOCKER'}_{suffix}"
+
+
+def container_sandbox_subdir(env_type: str | None) -> str:
+    """Directory under ``get_sandbox_dir()`` holding a docker-like backend's persistent sandboxes."""
+    return "podman" if env_type == "podman" else "docker"
 
 
 def _plugin_registry_lookup(env_type: str, fn_name: str, default, *args):

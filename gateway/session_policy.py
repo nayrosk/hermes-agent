@@ -513,11 +513,13 @@ def build_policy(params, config, *, private_secrets=None, profile_terminal=True,
 
 
 def terminal_uses_host_cwd(terminal):
-    """Whether the terminal works in the session's host cwd: the local backend, or docker mounting it at
-    ``/workspace``. ssh, modal and the other sandboxes resolve their own cwd."""
+    """Whether the terminal works in the session's host cwd: the local backend, or docker/podman mounting it
+    at ``/workspace``. ssh, modal and the other sandboxes resolve their own cwd."""
+    from tools.terminal_tool_config import container_runtime_env_var, is_docker_like_backend
     backend = str(terminal.get('TERMINAL_ENV') or 'local').strip().lower()
-    mounts = str(terminal.get('TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
-    return backend == 'local' or (backend == 'docker' and mounts)
+    mount_var = container_runtime_env_var(backend, 'MOUNT_CWD_TO_WORKSPACE')
+    mounts = str(terminal.get(mount_var) or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+    return backend == 'local' or (is_docker_like_backend(backend) and mounts)
 
 
 def _profile_workspace_cwd(home):

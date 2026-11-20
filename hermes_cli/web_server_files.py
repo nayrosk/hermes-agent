@@ -169,10 +169,9 @@ def _in_fallback_sandbox(target: Path, workspace_key: str) -> bool:
     translator's order (then the profile's shared ones). The session's own is that first name
     whether or not its directory exists: reads fall through to the shared copies when the session's
     file or its whole sandbox is gone, and a Save that did would change another sandbox's file."""
-    from gateway.platforms.docker_media_paths import _docker_sandbox_dir_candidates
-    from tools.environments.base import get_sandbox_dir
+    from gateway.platforms.docker_media_paths import _docker_sandbox_dir_candidates, sandbox_backend_root
 
-    base = get_sandbox_dir() / "docker"
+    base = sandbox_backend_root()
     names = _docker_sandbox_dir_candidates("", workspace_key)
     fallbacks = [(base / name).resolve(strict=False) for name in names[1:]]
     return any(_path_is_under(sandbox, target) for sandbox in fallbacks)
